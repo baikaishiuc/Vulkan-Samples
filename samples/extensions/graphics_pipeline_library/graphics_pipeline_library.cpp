@@ -29,6 +29,7 @@
 #include "scene_graph/components/sub_mesh.h"
 
 #define ENABLE_GPL 							0
+#define ENABLE_SHADER_HADNLE 				1
 
 #define count_of_array(a) 				(sizeof (a) / sizeof (a[0]))
 
@@ -279,6 +280,10 @@ void GraphicsPipelineLibrary::prepare_pipeline_library()
 
 		VkPipelineRasterizationStateCreateInfo rasterizationState = vkb::initializers::pipeline_rasterization_state_create_info(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_CLOCKWISE, 0);
 
+#if ENABLE_SHADER_HADNLE
+		VkPipelineShaderStageCreateInfo shader_Stage_create_info =
+		 	ApiVulkanSample::load_shader("graphics_pipeline_library/" + get_shader_folder() + "/shared.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+#else
 		// Using the pipeline library extension, we can skip the pipeline shader module creation and directly pass the shader code to the pipeline
 		std::vector<uint32_t> spirv;
 		load_shader("shared.vert.spv", VK_SHADER_STAGE_VERTEX_BIT, spirv);
@@ -293,6 +298,7 @@ void GraphicsPipelineLibrary::prepare_pipeline_library()
 		shader_Stage_create_info.pNext = &shader_module_create_info;
 		shader_Stage_create_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
 		shader_Stage_create_info.pName = "main";
+#endif
 
 		VkGraphicsPipelineCreateInfo pipeline_library_create_info{};
 		pipeline_library_create_info.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -342,6 +348,10 @@ void GraphicsPipelineLibrary::prepare_new_pipeline()
 	VkPipelineDepthStencilStateCreateInfo depth_stencil_state = vkb::initializers::pipeline_depth_stencil_state_create_info(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
 	VkPipelineMultisampleStateCreateInfo  multisample_state   = vkb::initializers::pipeline_multisample_state_create_info(VK_SAMPLE_COUNT_1_BIT);
 
+#if ENABLE_SHADER_HADNLE
+	VkPipelineShaderStageCreateInfo shader_Stage_create_info =
+		 ApiVulkanSample::load_shader("graphics_pipeline_library/" + get_shader_folder() + "/uber.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+#else
 	// Using the pipeline library extension, we can skip the pipeline shader module creation and directly pass the shader code to the pipeline
 	std::vector<uint32_t> spirv;
 	load_shader("uber.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT, spirv);
@@ -356,6 +366,7 @@ void GraphicsPipelineLibrary::prepare_new_pipeline()
 	shader_Stage_create_info.pNext = &shader_module_create_info;
 	shader_Stage_create_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
 	shader_Stage_create_info.pName = "main";
+#endif
 
 	// Select lighting model using a specialization constant
 	srand(static_cast<unsigned int>(time(NULL)));
