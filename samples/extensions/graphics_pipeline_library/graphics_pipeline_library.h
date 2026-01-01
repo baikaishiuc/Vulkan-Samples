@@ -81,6 +81,7 @@ class GraphicsPipelineLibrary : public ApiVulkanSample
 	void         load_shader(const std::string filename, VkShaderStageFlagBits shader_stage, std::vector<uint32_t> &spirv);
 	void         prepare_pipeline_library();
 	void         prepare_new_pipeline();
+	void 		 prepare_new_monolithic_pipeline();
 	void         pipeline_creation_threadfn();
 	void         prepare_uniform_buffers();
 	void         update_uniform_buffers();

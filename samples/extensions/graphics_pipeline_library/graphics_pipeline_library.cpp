@@ -28,13 +28,21 @@
 
 #include "scene_graph/components/sub_mesh.h"
 
+#define ENABLE_GPL 							0
+
+#define count_of_array(a) 				(sizeof (a) / sizeof (a[0]))
+
 void GraphicsPipelineLibrary::pipeline_creation_threadfn()
 {
 	const std::lock_guard<std::mutex> lock(mutex);
 
 	auto start = std::chrono::steady_clock::now();
 
+#if ENABLE_GPL
 	prepare_new_pipeline();
+#else
+	prepare_new_monolithic_pipeline();
+#endif
 	new_pipeline_created = true;
 
 	// Change viewport/draw count
@@ -92,13 +100,6 @@ void GraphicsPipelineLibrary::build_command_buffers()
 	VkClearValue clear_values[2];
 	clear_values[0].color        = {{0.0f, 0.0f, 0.033f, 0.0f}};
 	clear_values[1].depthStencil = {1.0f, 0};
-
-	VkRenderPassBeginInfo render_pass_begin_info = vkb::initializers::render_pass_begin_info();
-	render_pass_begin_info.renderPass            = render_pass;
-	render_pass_begin_info.renderArea.offset.x   = 0;
-	render_pass_begin_info.renderArea.offset.y   = 0;
-	render_pass_begin_info.clearValueCount       = 2;
-	render_pass_begin_info.pClearValues          = clear_values;
 
 	for (int32_t i = 0; i < draw_cmd_buffers.size(); ++i)
 	{
@@ -422,6 +423,102 @@ void GraphicsPipelineLibrary::prepare_new_pipeline()
 	pipeline_library.fragment_shaders.push_back(fragment_shader);
 }
 
+void 		 GraphicsPipelineLibrary::prepare_new_monolithic_pipeline()
+{
+	// 1. vertex input
+	VkPipelineVertexInputStateCreateInfo vertex_input_state = vkb::initializers::pipeline_vertex_input_state_create_info();
+	std::vector<VkVertexInputBindingDescription> vertex_input_bindings = {
+		vkb::initializers::vertex_input_binding_description(0, sizeof (Vertex), VK_VERTEX_INPUT_RATE_VERTEX),
+	};
+	std::vector<VkVertexInputAttributeDescription> vertex_input_attributes = {
+		vkb::initializers::vertex_input_attribute_description(0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0), 					// Position
+		vkb::initializers::vertex_input_attribute_description(0, 1, VK_FORMAT_R32G32B32_SFLOAT, sizeof (float) * 3), 	// Normal
+		vkb::initializers::vertex_input_attribute_description(0, 2, VK_FORMAT_R32G32_SFLOAT, sizeof (float) * 6) 		// UV
+	};
+	vertex_input_state.vertexBindingDescriptionCount = static_cast<uint32_t>(vertex_input_bindings.size());
+	vertex_input_state.pVertexBindingDescriptions = vertex_input_bindings.data();
+	vertex_input_state.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertex_input_attributes.size());
+	vertex_input_state.pVertexAttributeDescriptions = vertex_input_attributes.data();
+
+	// 2. input assembly
+	VkPipelineInputAssemblyStateCreateInfo input_assembly_state
+		= vkb::initializers::pipeline_input_assembly_state_create_info(VK_PRIMITIVE_TOPOLOGY_LINE_LIST, 0, VK_FALSE);
+
+	VkDynamicState vertexDynamicStates[2] = {
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR
+	};
+
+	VkPipelineDynamicStateCreateInfo dynamicInfo{};
+	dynamicInfo.sType 				= VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicInfo.dynamicStateCount 	= count_of_array(vertexDynamicStates);
+	dynamicInfo.pDynamicStates 		= vertexDynamicStates;
+
+	VkPipelineViewportStateCreateInfo viewportState = {};
+	viewportState.sType 			= VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportState.viewportCount 	= 1;
+	viewportState.scissorCount 	= 1;
+
+	// multisample
+	VkPipelineMultisampleStateCreateInfo multisample_state      = vkb::initializers::pipeline_multisample_state_create_info(VK_SAMPLE_COUNT_1_BIT);
+
+	// depth stencil state
+	VkPipelineDepthStencilStateCreateInfo depth_stencil_state = vkb::initializers::pipeline_depth_stencil_state_create_info(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+
+	// color blend
+	VkPipelineColorBlendAttachmentState  blend_attachment_state = vkb::initializers::pipeline_color_blend_attachment_state(0xf, VK_FALSE);
+	VkPipelineColorBlendStateCreateInfo  color_blend_state      = vkb::initializers::pipeline_color_blend_state_create_info(1, &blend_attachment_state);
+
+	// rasterization state
+	VkPipelineRasterizationStateCreateInfo rasterizationState =
+		vkb::initializers::pipeline_rasterization_state_create_info(VK_POLYGON_MODE_FILL, VK_CULL_MODE_BACK_BIT, VK_FRONT_FACE_COUNTER_CLOCKWISE, 0);
+
+	// shader stage
+	std::array<VkPipelineShaderStageCreateInfo, 2> shader_stages{};
+	shader_stages[0] = ApiVulkanSample::load_shader("graphics_pipeline_library/" + get_shader_folder() + "/shared.vert.spv", VK_SHADER_STAGE_VERTEX_BIT);
+	shader_stages[1] = ApiVulkanSample::load_shader("graphics_pipeline_library/" + get_shader_folder() + "/uber.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT);
+
+	srand(static_cast<unsigned int>(time(NULL)));
+	uint32_t lighting_model = (rand() % 3);
+
+	// Each shder constant o a shader stage corresponds to one map entry
+	VkSpecializationMapEntry specialization_map_entry {};
+	specialization_map_entry.constantID = 0;
+	specialization_map_entry.size 		= sizeof (uint32_t);
+
+	VkSpecializationInfo specialization_info {};
+	specialization_info.mapEntryCount 		= 1;
+	specialization_info.pMapEntries 		= &specialization_map_entry;
+	specialization_info.dataSize 			= sizeof (uint32_t);
+	specialization_info.pData 				= &lighting_model;
+
+	shader_stages[1].pSpecializationInfo 	= &specialization_info;
+
+	// final pipeline create
+	VkGraphicsPipelineCreateInfo pipeline_create_info {};
+
+	pipeline_create_info.sType 			= VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	pipeline_create_info.flags 			= 0;
+	pipeline_create_info.stageCount 	= shader_stages.size();
+	pipeline_create_info.pStages 		= shader_stages.data();
+	pipeline_create_info.pVertexInputState 		= &vertex_input_state;
+	pipeline_create_info.pInputAssemblyState  	= &input_assembly_state;
+	pipeline_create_info.pTessellationState 	= NULL;
+	pipeline_create_info.pViewportState 		= &viewportState;
+	pipeline_create_info.pRasterizationState 	= &rasterizationState;
+	pipeline_create_info.pMultisampleState 		= &multisample_state;
+	pipeline_create_info.pDepthStencilState 	= &depth_stencil_state;
+	pipeline_create_info.pColorBlendState 		= &color_blend_state;
+	pipeline_create_info.pDynamicState 			= &dynamicInfo;
+	pipeline_create_info.layout 				= pipeline_layout;
+	pipeline_create_info.renderPass 			= render_pass;
+
+	VkPipeline executable = VK_NULL_HANDLE;
+	VK_CHECK(vkCreateGraphicsPipelines(get_device().get_handle(), thread_pipeline_cache, 1, &pipeline_create_info, nullptr, &executable));
+
+	pipelines.push_back(executable);
+}
+
 // Prepare and initialize uniform buffer containing shader uniforms
 void GraphicsPipelineLibrary::prepare_uniform_buffers()
 {
@@ -467,7 +564,10 @@ bool GraphicsPipelineLibrary::prepare(const vkb::ApplicationOptions &options)
 	load_assets();
 	prepare_uniform_buffers();
 	setup_descriptor_set_layout();
+
+#if ENABLE_GPL
 	prepare_pipeline_library();
+#endif
 	setup_descriptor_pool();
 	setup_descriptor_sets();
 	build_command_buffers();
